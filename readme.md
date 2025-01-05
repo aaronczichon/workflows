@@ -9,7 +9,7 @@ Following workflows are currently available:
 
 | Name | Description |
 | ---- | ----------- |
-| `delete-pages-instance` | Used to delete a pages deployment based on branch name. E.g. used after PR is merged to remove PR deployments on a Pages project. |
+| `cloudflare-delete-pages-instance` | Used to delete a pages deployment based on branch name. E.g. used after PR is merged to remove PR deployments on a Pages project. |
 
 # Use workflows
 
