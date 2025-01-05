@@ -1,0 +1,96 @@
+name: Bundle Android App
+
+on:
+  workflow_call:
+    inputs:
+      ANDROID_PROJECT_FOLDER:
+        required: true
+        type: string
+    secrets:
+      KEYSTORE_CONTENT:
+        required: true
+      KEYSTORE_PATH:
+        required: true
+      KEYSTORE_ALIAS:
+        required: true
+      KEYSTORE_PASSWORD:
+        required: true
+
+jobs:
+  bundle-android-app:
+    name: Build & Bundle Android App
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Setting up Java 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin' # See 'Supported distributions' for available options
+          java-version: '17'
+      - name: Cache Gradle and wrapper
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
+      - name: Decode Keystore
+        uses: akiojin/decode-base64-github-action@v0.1.0
+        with:
+          base64: ${{ secrets.KEYSTORE_CONTENT }}
+          output-path: ${{ secrets.KEYSTORE_PATH }}
+      - name: Verify keystore
+        run: |
+          keytool -list -v -keystore ${{ secrets.KEYSTORE_PATH }} -storepass ${{ secrets.KEYSTORE_PASSWORD }}
+      - name: Build Release APK
+        env:
+          SIGNING_KEY_STORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+          SIGNING_KEY_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        working-directory: ${{ inputs.REPOSITORY }}
+        run: ./gradlew assembleRelease
+      - name: Sign APK
+        env:
+          SIGNING_KEY_STORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+          SIGNING_KEY_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 -keystore $SIGNING_KEY_STORE_PATH ${{ inputs.REPOSITORY }}/app/build/outputs/apk/release/app-release-unsigned.apk $SIGNING_KEY_ALIAS -storepass $SIGNING_KEY_PASSWORD
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Build Tools
+        run: |
+          sdkmanager "build-tools;30.0.3"
+      - name: Use zipalign
+        run: |
+          $ANDROID_HOME/build-tools/30.0.3/zipalign -v 4 ${{ inputs.REPOSITORY }}/app/build/outputs/apk/release/app-release-unsigned.apk android/app/build/outputs/apk/release/signed.apk
+      - name: Build Release Android Application Bundle (AAB)
+        env:
+          SIGNING_KEY_STORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+          SIGNING_KEY_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        working-directory: ${{ inputs.REPOSITORY }}
+        run: ./gradlew bundleRelease
+      - name: Sign Bundle
+        env:
+          SIGNING_KEY_STORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+          SIGNING_KEY_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 -keystore $SIGNING_KEY_STORE_PATH -signedjar ${{ inputs.REPOSITORY }}/app/build/outputs/bundle/release/signed_app.aab android/app/build/outputs/bundle/release/app-release.aab $SIGNING_KEY_ALIAS -storepass $SIGNING_KEY_PASSWORD
+      - name: Upload Release APK Build to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android.apk
+          path: |
+            ${{ inputs.REPOSITORY }}/app/build/outputs/apk/release/signed.apk
+      - name: Upload Release ABB Build to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android.aab
+          path: |
+            ${{ inputs.REPOSITORY }}/app/build/outputs/bundle/release/signed_app.aab
